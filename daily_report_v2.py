@@ -22,9 +22,9 @@ if env_path.exists():
                 key, value = line.split('=', 1)
                 os.environ.setdefault(key, value.strip('"\''))
 
-DB_PATH = os.getenv('CARDMARKET_DB_PATH', '/Users/robert/Projects/cardmarket-tracker/cardmarket.db')
+DB_PATH = os.getenv('CARDMARKET_DB_PATH', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cardmarket.db'))
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '-5223953277')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 PRODUCTS = {
     1: {'name': 'Arcane Box Set', 'emoji': '🔮'},

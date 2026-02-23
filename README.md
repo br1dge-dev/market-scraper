@@ -43,7 +43,7 @@ python3 -c "import sqlite3; conn = sqlite3.connect('cardmarket.db'); conn.execut
 ## Crontab
 
 ```cron
-SKILL_DIR=/Users/robert/Projects/cardmarket-tracker
+SKILL_DIR=/path/to/cardmarket-tracker
 
 27 * * * * cd $SKILL_DIR && python3 scraper.py origins
 42 * * * * cd $SKILL_DIR && python3 scraper.py spiritforged
