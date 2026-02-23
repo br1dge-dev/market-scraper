@@ -1,0 +1,21 @@
+{
+  "name": "cardmarket-weekly-report",
+  "schedule": {
+    "kind": "cron",
+    "expr": "0 21 * * 0",
+    "tz": "Europe/Berlin"
+  },
+  "sessionTarget": "isolated",
+  "payload": {
+    "kind": "agentTurn",
+    "message": "📈 WÖCHENTLICHES CARDMARKET INTELLIGENCE\n\nDB: /Users/robert/.openclaw/workspace/cardmarket.db\n\nAnalysiere letzte 7 Tage:\n\n1. Preis-Range:\n   SELECT MIN(floor_price), MAX(floor_price), AVG(floor_price) FROM scrapes WHERE scraped_at >= datetime('now', '-7 days')\n\n2. Trend-Bestimmung:\n   - Vergleiche AVG erster 3 Tage vs letzte 3 Tage\n   - Emoji: 📉 fallend / 📈 steigend / ➡️ stabil\n\n3. Geschätzte Verkäufe:\n   SELECT COUNT(*) FROM suspected_sales WHERE detected_at >= datetime('now', '-7 days')\n\n4. Seller-Retention:\n   - Wie viele Seller sind durchgehend dabei?\n   - Wie viele sind neu gegangen/gekommen?\n\n5. Empfehlung:\n   - KAUFEN (Floor sinkt, gute Zeit)\n   - WARTEN (Floor steigt, warte auf Dip)\n   - STABIL (Preis ist konsistent)\n\nFormatiere als lesbaren Telegram-Report.",
+    "model": "hyperclaw/kimi-k2.5",
+    "thinking": "off"
+  },
+  "delivery": {
+    "mode": "announce",
+    "channel": "telegram",
+    "to": "REDACTED"
+  },
+  "enabled": true
+}

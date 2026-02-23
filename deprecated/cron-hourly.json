@@ -1,0 +1,20 @@
+{
+  "name": "cardmarket-hourly-scrape",
+  "schedule": {
+    "kind": "every",
+    "everyMs": 3600000
+  },
+  "sessionTarget": "isolated",
+  "payload": {
+    "kind": "agentTurn",
+    "message": "🕐 CARDMARKET SCRAPE (Arcane Box Set)\n\nAUFGABE: Scrape Cardmarket Listings und speichere in SQLite.\n\nSCHRITTE:\n1. Starte isolierten Browser: browser(action=start, profile=openclaw)\n2. Öffne: https://www.cardmarket.com/en/Riftbound/Products/Box-Sets/Arcane-Box-Set?sellerCountry=7\n3. Warte 5 Sekunden für JavaScript-Rendering\n4. Mache Snapshot (refs=aria für stabile Selektoren)\n5. Extrahiere ALLE Listings mit folgenden Feldern:\n   - seller (Seller-Name)\n   - seller_rating (Zahl z.B. 99.8 oder leer)\n   - seller_type (private/power/etc oder leer)\n   - price (Zahl in EUR, z.B. 199.95)\n   - quantity (Zahl, default 1)\n   - location (muss \"Germany\" sein - PRÜFEN!)\n\n6. Speichere in SQLite DB unter /Users/robert/.openclaw/workspace/cardmarket.db:\n   - INSERT INTO scrapes (product_id, total_listings, floor_price, filters_applied)\n   - Für jedes Listing: INSERT INTO listings (scrape_id, seller, seller_rating, seller_type, price, quantity, location)\n\n7. Prüfe auf Verkaufsverdacht: Vergleiche mit vorherigem Scrape (MAX(scrape_id)-1), identifiziere fehlende Q1-Seller\n\n8. Report: Floor-Price, Anzahl Listings, neue/fehlende Seller\n\n❌ ABORT wenn location nicht Germany!",
+    "model": "hyperclaw/kimi-k2.5",
+    "thinking": "on"
+  },
+  "delivery": {
+    "mode": "announce",
+    "channel": "telegram",
+    "to": "REDACTED"
+  },
+  "enabled": true
+}

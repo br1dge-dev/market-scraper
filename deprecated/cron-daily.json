@@ -1,0 +1,21 @@
+{
+  "name": "cardmarket-daily-report",
+  "schedule": {
+    "kind": "cron",
+    "expr": "0 20 * * *",
+    "tz": "Europe/Berlin"
+  },
+  "sessionTarget": "isolated",
+  "payload": {
+    "kind": "agentTurn",
+    "message": "📊 TÄGLICHES CARDMARKET REPORTING\n\nDB: /Users/robert/.openclaw/workspace/cardmarket.db\n\nFühre SQL-Queries aus und erstelle Report:\n\n1. Aktuelle Stats:\n   - SELECT * FROM scrapes ORDER BY scraped_at DESC LIMIT 1\n   - SELECT COUNT(*) FROM listings WHERE scrape_id = (SELECT MAX(id) FROM scrapes)\n\n2. 24h Entwicklung:\n   - Vergleiche floor_price von heute vs gestern\n   - Verkaufs-Schätzung (fehlende Seller aus Q1-Preisbereich)\n\n3. Top 5 günstigste deutsche Listings:\n   SELECT seller, price FROM listings WHERE scrape_id = (SELECT MAX(id) FROM scrapes) ORDER BY price ASC LIMIT 5\n\n4. Neue Seller (seit gestern):\n   SELECT DISTINCT seller FROM listings WHERE scrape_id = (SELECT MAX(id) FROM scrapes) AND seller NOT IN (SELECT DISTINCT seller FROM listings WHERE scrape_id = (SELECT MAX(id)-1 FROM scrapes WHERE id > 0))\n\nFormatiere als lesbaren Telegram-Report mit Emojis.",
+    "model": "hyperclaw/kimi-k2.5",
+    "thinking": "off"
+  },
+  "delivery": {
+    "mode": "announce",
+    "channel": "telegram",
+    "to": "REDACTED"
+  },
+  "enabled": true
+}
