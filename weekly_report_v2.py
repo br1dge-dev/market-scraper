@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Cardmarket Daily Report v2 - Premium Telegram Report
-Sparklines, Trends, Insights, Market Overview
+Cardmarket Weekly Report v2 - Premium Telegram Report
+Sparklines, Trends, Insights (wie Daily v2, aber für 7 Tage)
 """
 
 import sqlite3
@@ -71,49 +71,69 @@ def sparkline(values):
     return ''.join(SPARKLINE_CHARS[min(int((v - mn) / rng * 7), 7)] for v in values)
 
 
-def get_24h_floors(cursor, product_id):
-    """Holt stündliche Floor-Preise der letzten 24h."""
+def get_weekly_data(cursor, product_id):
+    """Holt tägliche Floor-Preise der letzten 7 Tage (1x pro Tag)."""
     cursor.execute('''
         SELECT floor_price, scraped_at
         FROM scrapes
-        WHERE product_id = ? AND scraped_at > datetime('now', '-24 hours')
+        WHERE product_id = ? AND scraped_at > datetime('now', '-7 days')
         ORDER BY scraped_at ASC
     ''', (product_id,))
     return cursor.fetchall()
 
 
-def get_current_and_previous(cursor, product_id):
-    """Aktueller + 24h-vorheriger Scrape."""
+def get_weekly_stats(cursor, product_id):
+    """Holt Wochen-Stats (Min/Max/Avg)."""
     cursor.execute('''
-        SELECT floor_price, total_listings, scraped_at
-        FROM scrapes WHERE product_id = ?
-        ORDER BY id DESC LIMIT 1
+        SELECT 
+            MIN(floor_price) as min_price,
+            MAX(floor_price) as max_price,
+            AVG(floor_price) as avg_price,
+            MIN(total_listings) as min_listings,
+            MAX(total_listings) as max_listings,
+            COUNT(*) as scrape_count
+        FROM scrapes
+        WHERE product_id = ? 
+        AND scraped_at > datetime('now', '-7 days')
+    ''', (product_id,))
+    return cursor.fetchone()
+
+
+def get_current_and_week_ago(cursor, product_id):
+    """Aktueller + Vorwoche Preis für Trend."""
+    cursor.execute('''
+        SELECT floor_price
+        FROM scrapes
+        WHERE product_id = ?
+        ORDER BY scraped_at DESC LIMIT 1
     ''', (product_id,))
     current = cursor.fetchone()
-
+    
     cursor.execute('''
-        SELECT floor_price, total_listings
+        SELECT floor_price
         FROM scrapes
-        WHERE product_id = ? AND scraped_at < datetime('now', '-20 hours')
-        ORDER BY id DESC LIMIT 1
+        WHERE product_id = ? AND scraped_at < datetime('now', '-6 days')
+        ORDER BY scraped_at DESC LIMIT 1
     ''', (product_id,))
-    previous = cursor.fetchone()
+    week_ago = cursor.fetchone()
+    
+    return current[0] if current else None, week_ago[0] if week_ago else None
 
-    return current, previous
 
-
-def get_suspected_sales_24h(cursor):
+def get_weekly_sales(cursor):
+    """Holt Verkaufsverdachte der Woche."""
     cursor.execute('''
         SELECT p.name, COUNT(*) as cnt, MIN(s.price) as min_p, MAX(s.price) as max_p
         FROM suspected_sales s
         JOIN products p ON s.product_id = p.id
-        WHERE s.detected_at > datetime('now', '-24 hours')
+        WHERE s.detected_at > datetime('now', '-7 days')
         GROUP BY s.product_id
     ''')
     return cursor.fetchall()
 
 
 def format_change(current, previous):
+    """Formatiert Preisänderung mit Pfeilen."""
     if not previous or not current:
         return '🆕'
     diff = current - previous
@@ -125,77 +145,81 @@ def format_change(current, previous):
     return f'{arrow} {sign}{diff:.2f}€ ({sign}{pct:.1f}%)'
 
 
-def generate_report():
+def generate_weekly_report():
     conn = get_db()
     cursor = conn.cursor()
 
     now = datetime.now()
     today_str = now.strftime('%d.%m.%Y')
-    time_str = now.strftime('%H:%M')
+    week_start = (now - timedelta(days=7)).strftime('%d.%m.')
 
     lines = []
-    lines.append(f'📊 <b>RIFTBOUND MARKTBERICHT</b>')
-    lines.append(f'🕐 {today_str} · {time_str} Uhr')
+    lines.append(f'📈 <b>RIFTBOUND WEEKLY REPORT</b>')
+    lines.append(f'🗓️ {week_start} - {today_str}')
     lines.append('━' * 22)
     lines.append('')
 
     product_data = {}
 
     for pid, pcfg in PRODUCTS.items():
-        current, previous = get_current_and_previous(cursor, pid)
-        floors_24h = get_24h_floors(cursor, pid)
+        weekly_data = get_weekly_data(cursor, pid)
+        stats = get_weekly_stats(cursor, pid)
+        current, week_ago = get_current_and_week_ago(cursor, pid)
 
-        if not current:
-            lines.append(f'{pcfg["emoji"]} <b>{pcfg["name"]}</b>: Keine Daten')
+        if not stats or not stats[0] or not current:
+            lines.append(f'{pcfg["emoji"]} <b>{pcfg["name"]}:</b> Keine Daten')
             lines.append('')
             continue
 
-        floor = current[0]
-        listings = current[1]
-        prev_floor = previous[0] if previous else None
-        prev_listings = previous[1] if previous else None
-
-        prices = [r[0] for r in floors_24h]
-        times = [r[1] for r in floors_24h]
-
-        # 24h stats
-        low_24h = min(prices) if prices else floor
-        high_24h = max(prices) if prices else floor
-        spark = sparkline(prices)
-
-        # Best buy time
-        best_time = '—'
-        if prices and times:
-            min_idx = prices.index(min(prices))
+        min_price, max_price, avg_price, min_listings, max_listings, count = stats
+        
+        # Sparkline aus täglichen Daten
+        daily_prices = [r[0] for r in weekly_data] if weekly_data else [current]
+        spark = sparkline(daily_prices)
+        
+        # Best day/time für Bestpreis
+        best_day = '—'
+        if weekly_data:
+            min_idx = daily_prices.index(min(daily_prices))
             try:
-                best_time = datetime.fromisoformat(times[min_idx]).strftime('%H:%M')
+                best_time = datetime.fromisoformat(weekly_data[min_idx][1])
+                best_day = best_time.strftime('%a %H:%M')
             except:
-                best_time = times[min_idx][-5:]
+                best_day = weekly_data[min_idx][1][:10]
 
-        change_str = format_change(floor, prev_floor)
-
-        listing_change = ''
-        if prev_listings:
-            ldiff = listings - prev_listings
-            if ldiff != 0:
-                sign = '+' if ldiff > 0 else ''
-                listing_change = f' ({sign}{ldiff})'
+        # Trend Vergleich Woche
+        change_str = format_change(current, week_ago)
+        
+        # Listings Range
+        listings_change = ''
+        if min_listings and max_listings:
+            if max_listings != min_listings:
+                listings_change = f' ({min_listings}-{max_listings})'
+            else:
+                listings_change = f' ({min_listings})'
 
         lines.append(f'{pcfg["emoji"]} <b>{pcfg["name"]}</b>')
-        lines.append(f'   💶 Floor: <b>{floor:.2f}€</b>  {change_str}')
-        lines.append(f'   📉 24h Range: {low_24h:.2f}€ – {high_24h:.2f}€')
-        lines.append(f'   📦 Listings: {listings}{listing_change}')
-        lines.append(f'   📈 24h: <code>{spark}</code>')
-        if low_24h < floor:
-            lines.append(f'   ⏰ Tiefpunkt: {best_time} ({low_24h:.2f}€)')
+        lines.append(f'   💶 Floor: <b>{current:.2f}€</b>  {change_str}')
+        lines.append(f'   📊 Ø Schnitt: {avg_price:.2f}€')
+        lines.append(f'   📉 Range: {min_price:.2f}€ - {max_price:.2f}€')
+        lines.append(f'   📦 Listings: Aktuell{listings_change}')
+        lines.append(f'   📈 7-Tage: <code>{spark}</code>')
+        if min_price < current:
+            lines.append(f'   ⏰ Bestpreis: {best_day} ({min_price:.2f}€)')
+        lines.append(f'   🔄 Scans: {count}')
         lines.append('')
 
-        product_data[pid] = {'floor': floor, 'listings': listings, 'name': pcfg['name'], 'emoji': pcfg['emoji']}
+        product_data[pid] = {
+            'floor': current,
+            'avg': avg_price,
+            'name': pcfg['name'],
+            'emoji': pcfg['emoji']
+        }
 
     # Suspected sales
-    sales = get_suspected_sales_24h(cursor)
+    sales = get_weekly_sales(cursor)
     if sales:
-        lines.append('🚨 <b>Verkaufsverdacht (24h)</b>')
+        lines.append('🚨 <b>Verkaufsverdacht (7 Tage)</b>')
         for name, cnt, min_p, max_p in sales:
             if min_p == max_p:
                 lines.append(f'   • {name}: {cnt}x @ {min_p:.2f}€')
@@ -206,32 +230,34 @@ def generate_report():
     # Market overview
     if product_data:
         cheapest = min(product_data.values(), key=lambda x: x['floor'])
-        total_listings = sum(v['listings'] for v in product_data.values())
-
         lines.append('━' * 22)
         lines.append(f'🏷️ Günstigster: <b>{cheapest["name"]}</b> ({cheapest["floor"]:.2f}€)')
-        lines.append(f'📦 Markt gesamt: {total_listings} Listings')
-
-        # Ranking
+        
+        # Ranking by floor price
         sorted_p = sorted(product_data.values(), key=lambda x: x['floor'])
         ranking = ' → '.join(f'{p["emoji"]}{p["floor"]:.0f}€' for p in sorted_p)
         lines.append(f'🏆 {ranking}')
+        
+        # Ranking by average
+        sorted_avg = sorted(product_data.values(), key=lambda x: x['avg'])
+        avg_ranking = ' → '.join(f'{p["emoji"]}{p["avg"]:.0f}€' for p in sorted_avg)
+        lines.append(f'📊 Ø-Schnitt: {avg_ranking}')
 
     lines.append('')
-    lines.append('<i>cardmarket.com · DE Seller · EN Karten · stündlich gescannt</i>')
+    lines.append('<i>Wochenbericht | cardmarket.com | stündlich gescannt</i>')
 
     conn.close()
     return '\n'.join(lines)
 
 
 def main():
-    print("📊 Generiere Daily Report v2...")
-    report = generate_report()
+    print("📈 Generiere Weekly Report v2...")
+    report = generate_weekly_report()
     print()
     print(report)
     print()
     if send_telegram_message(report):
-        print("✅ Report gesendet")
+        print("✅ Weekly Report gesendet")
     else:
         print("❌ Fehler beim Senden")
         return 1

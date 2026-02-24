@@ -9,6 +9,7 @@ import sqlite3
 import os
 import sys
 import json
+import time
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
@@ -34,23 +35,30 @@ MAX_AGE_HOURS = 2
 PRODUCTS = {1: 'Arcane Box Set', 2: 'Origins Booster', 3: 'Spiritforged Booster'}
 
 
-def send_telegram(message, chat_id=None):
+def send_telegram(message, chat_id=None, retries=3, delay=5):
     if not TELEGRAM_BOT_TOKEN:
         print(f"⚠️ No token — stdout only: {message}")
         return False
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = urllib.parse.urlencode({
-        'chat_id': chat_id or TELEGRAM_ALERT_CHAT_ID,
-        'text': message,
-        'parse_mode': 'HTML',
-    }).encode()
-    try:
-        req = urllib.request.Request(url, data=data, method='POST')
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode()).get('ok', False)
-    except Exception as e:
-        print(f"❌ Telegram error: {e}")
-        return False
+    for attempt in range(1, retries + 1):
+        try:
+            data = urllib.parse.urlencode({
+                'chat_id': chat_id or TELEGRAM_ALERT_CHAT_ID,
+                'text': message,
+                'parse_mode': 'HTML',
+            }).encode()
+            req = urllib.request.Request(url, data=data, method='POST')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+                if result.get('ok'):
+                    return True
+                print(f"⚠️ Telegram not ok (attempt {attempt}): {result.get('description')}")
+        except Exception as e:
+            print(f"❌ Telegram error (attempt {attempt}/{retries}): {e}")
+        if attempt < retries:
+            time.sleep(delay)
+    print("❌ All Telegram retries exhausted — alert not delivered!")
+    return False
 
 
 def check():
