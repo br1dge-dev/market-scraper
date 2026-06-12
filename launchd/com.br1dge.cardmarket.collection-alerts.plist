@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.br1dge.cardmarket.collection-alerts</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>collection_alerts.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/robert/Projects/cardmarket-tracker</string>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Minute</key>
+            <integer>20</integer>
+            <key>Hour</key>
+            <integer>4</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>20</integer>
+            <key>Hour</key>
+            <integer>10</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>20</integer>
+            <key>Hour</key>
+            <integer>16</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>20</integer>
+            <key>Hour</key>
+            <integer>22</integer>
+        </dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/cardmarket-collection-alerts.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/cardmarket-collection-alerts.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/robert</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

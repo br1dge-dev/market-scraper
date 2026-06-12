@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.br1dge.cardmarket.arcane</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>scraper.py</string>
+        <string>arcane</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/robert/Projects/cardmarket-tracker</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>57</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/cardmarket-arcane.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/cardmarket-arcane.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/robert</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
