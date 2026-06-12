@@ -22,6 +22,16 @@ from playwright.async_api import async_playwright
 PRICE_ALERT_THRESHOLD_PCT = 5  # Alert if listing is >=5% below current floor
 # ===========================
 
+# === SELLER BLOCKLIST ===
+# Seller mit bekannt merkwürdigen/irreführenden Listings
+BLOCKED_SELLERS = {
+    'WHITEBEARD23',  # Placeholder-Listings (111.11 / 333.33 / 555.55€, x341) — seit 19.02.2026 aktiv
+    'Kaiju-Cards',   # Fehlerhafte 1€ Listings für Origins Booster Box — seit 11.06.2026 aktiv
+}
+# ========================
+
+
+
 # .env laden
 env_path = Path(__file__).parent / '.env'
 if env_path.exists():
@@ -79,6 +89,34 @@ PRODUCTS = {
         'filter': 'sellerCountry=7&language=1',
         'required_location': 'Germany',
     },
+    'dazzling-aurora': {
+        'id': 4,
+        'name': 'Dazzling Aurora',
+        'url': 'https://www.cardmarket.com/en/Riftbound/Products/Singles/Origins/Dazzling-Aurora',
+        'filter': 'sellerCountry=7&language=1',
+        'required_location': 'Germany',
+    },
+    'unleashed': {
+        'id': 5,
+        'name': 'Unleashed Booster Box',
+        'url': 'https://www.cardmarket.com/en/Riftbound/Products/Booster-Boxes/Unleashed-Booster-Box',
+        'filter': 'sellerCountry=7&language=1',
+        'required_location': 'Germany',
+    },
+    'worlds-bundle': {
+        'id': 6,
+        'name': 'Worlds Bundle 2025',
+        'url': 'https://www.cardmarket.com/en/Riftbound/Products/Box-Sets/Worlds-Bundle-2025',
+        'filter': 'sellerCountry=7&language=1',
+        'required_location': 'Germany',
+    },
+    'proving-grounds': {
+        'id': 7,
+        'name': 'Proving Grounds',
+        'url': 'https://www.cardmarket.com/en/Riftbound/Products/Box-Sets/Proving-Grounds',
+        'filter': 'sellerCountry=7&language=1',
+        'required_location': 'Germany',
+    },
 }
 
 
@@ -95,7 +133,50 @@ async def extract_location(row):
     return 'Unknown'
 
 
-async def scrape_product(product_key: str):
+async def scrape_product_with_retry(product_key: str, max_retries: int = 1):
+    """Scraper mit Retry-Logik und detailliertem Error-Logging"""
+    cfg = PRODUCTS[product_key]
+    last_error = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            result = await scrape_product(product_key, attempt_number=attempt)
+            if attempt > 0:
+                print(f"✅ Retry erfolgreich nach {attempt} Versuch(en)")
+            return result
+        except Exception as e:
+            last_error = e
+            error_type = type(e).__name__
+            error_msg = str(e)
+            
+            print(f"\n❌ ATTEMPT {attempt + 1} FAILED: {error_type}")
+            print(f"   Details: {error_msg[:200]}")
+            
+            # Spezifische Fehlerursachen identifizieren
+            if "Timeout" in error_type:
+                if "article-row" in error_msg:
+                    print("   → Ursache: Cardmarket-Seite hat .article-row Element nicht geladen (langsamer Server/Netzwerk)")
+                else:
+                    print(f"   → Ursache: Playwright Timeout aufgetreten")
+            elif "net::" in error_msg or "ERR_" in error_msg:
+                print(f"   → Ursache: Netzwerk-Fehler (DNS/Verbindung/HTTP)")
+            elif "403" in error_msg or "Forbidden" in error_msg:
+                print("   → Ursache: HTTP 403 - Cloudflare/Block (aber NICHT 429)")
+            elif "429" in error_msg or "Too Many" in error_msg:
+                print("   → Ursache: HTTP 429 - Rate Limit hit!")
+            
+            if attempt < max_retries:
+                wait_time = 5 + (attempt * 5)  # 5s, dann 10s
+                print(f"   → Retry in {wait_time}s... (Versuch {attempt + 2}/{max_retries + 1})")
+                await asyncio.sleep(wait_time)
+            else:
+                print(f"   → Alle {max_retries + 1} Versuche gescheitert.")
+    
+    # Alle Retries aufgebraucht
+    raise last_error
+
+
+async def scrape_product(product_key: str, attempt_number: int = 0):
     """Scraper für ein Produkt"""
     cfg = PRODUCTS[product_key]
     product_id = cfg['id']
@@ -103,7 +184,7 @@ async def scrape_product(product_key: str):
     filter_url = f"{product_url}?{cfg['filter']}"
     required_location = cfg['required_location']
 
-    print(f"🦋 {cfg['name']} Scraper - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"🦋 {cfg['name']} Scraper - {datetime.now().strftime('%Y-%m-%d %H:%M')} (Attempt {attempt_number + 1})")
     print(f"URL: {filter_url}")
     print(f"Required Location: {required_location}")
     print()
@@ -133,7 +214,7 @@ async def scrape_product(product_key: str):
             response = await page.goto(filter_url, wait_until='domcontentloaded', timeout=60000)
             print(f"📊 Status: {response.status}")
 
-            await page.wait_for_selector('.article-row', timeout=30000)
+            await page.wait_for_selector('.article-row', timeout=60000)
             await page.wait_for_timeout(3000)
 
             initial_count = len(await page.query_selector_all('.article-row'))
@@ -225,6 +306,9 @@ async def scrape_product(product_key: str):
                     location = await extract_location(row)
 
                     if seller and seller != 'Unknown' and price > 0:
+                        if seller in BLOCKED_SELLERS:
+                            print(f"   🚫 Blocked: {seller} ({price:.2f}€ x{qty})")
+                            continue
                         listing = {'seller': seller, 'price': price, 'quantity': qty, 'location': location}
                         all_listings.append(listing)
 
@@ -421,7 +505,7 @@ def main():
         print(f"   Valid: {', '.join(PRODUCTS.keys())}")
         sys.exit(1)
 
-    count, floor = asyncio.run(scrape_product(product_key))
+    count, floor = asyncio.run(scrape_product_with_retry(product_key))
     if floor:
         print(f"\n🏁 FERTIG: {count} Listings, Floor: {floor:.2f}€")
     else:
