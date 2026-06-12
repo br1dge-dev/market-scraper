@@ -34,14 +34,10 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')  # Riftbound Rippers group
 
 DRY_RUN = '--dry-run' in sys.argv
 
-PRODUCTS = {
-    1: {'name': 'Arcane Box Set',        'threshold': 175.0},
-    2: {'name': 'Origins Booster Box',   'threshold': 178.0},
-    3: {'name': 'Spiritforged Booster',  'threshold': 153.0},
-}
+from products import PRODUCTS
 
-DROP_PCT_TRIGGER = 0.05   # 5% drop vs 24h avg
-LISTING_SPIKE_TRIGGER = 0.25  # 25% listing increase vs prev scrape
+ATL_DROP_PCT = 0.05   # 5% unter bisherigem ATL = Alert
+ATL_ALERTS_LOG = Path(__file__).parent / '.atl_alerts_sent.json'  # Dedup-Tracking
 
 RETRY_ATTEMPTS = 3
 RETRY_DELAY_S = 5
@@ -122,48 +118,71 @@ def get_prev_listings(cursor, product_id):
     return rows[1] if len(rows) >= 2 else None
 
 
+def get_all_time_low(cursor, product_id):
+    """Historischer Tiefstpreis (min floor_price) für Produkt."""
+    cursor.execute('''
+        SELECT MIN(floor_price) as atl
+        FROM scrapes
+        WHERE product_id = ? AND floor_price IS NOT NULL
+    ''', (product_id,))
+    row = cursor.fetchone()
+    return row['atl'] if row and row['atl'] else None
+
+
+def load_atl_alerts_log():
+    """Gesendete ATL-Alerts laden (für Dedup)."""
+    if ATL_ALERTS_LOG.exists():
+        with open(ATL_ALERTS_LOG) as f:
+            return json.load(f)
+    return {}
+
+
+def save_atl_alerts_log(log):
+    """Gesendete ATL-Alerts speichern."""
+    with open(ATL_ALERTS_LOG, 'w') as f:
+        json.dump(log, f, indent=2)
+
+
 # --- Checks ---
 
-def check_product(cursor, pid, cfg):
+def check_product_atl(cursor, pid, cfg, alerts_log):
+    """
+    ATL-only Alert-Logik:
+    - Meldet nur wenn aktueller Floor < (ATL * 0.95) — mind. 5% unter bisherigem Tief
+    - Dedupliziert: Gleicher Floor-Preis nicht mehrfach melden
+    """
     name = cfg['name']
-    threshold = cfg['threshold']
     alerts = []
 
     latest = get_latest(cursor, pid)
-    if not latest:
+    if not latest or latest['floor_price'] is None:
         return alerts
 
-    floor = latest['floor_price']
-    listings = latest['total_listings']
+    current_floor = latest['floor_price']
+    atl = get_all_time_low(cursor, pid)
 
-    # 1) Absolute threshold
-    if floor is not None and floor < threshold:
+    if atl is None:
+        return alerts  # Noch keine Historie
+
+    # Prüfe: Ist current_floor ein neuer ATL (mind. 5% unter bisherigem ATL)?
+    atl_threshold = atl * (1 - ATL_DROP_PCT)
+
+    if current_floor <= atl_threshold:
+        # Dedup-Check: Haben wir diesen Floor-Preis bereits gemeldet?
+        product_key = str(pid)
+        last_alerted_floor = alerts_log.get(product_key)
+
+        if last_alerted_floor == current_floor:
+            return alerts  # Schon gemeldet
+
+        drop_pct = (atl - current_floor) / atl * 100
         alerts.append(
-            f"📉 <b>{name}</b>: Floor bei <b>{floor:.2f}€</b> — unter Schwellwert ({threshold:.0f}€)"
+            f"🚨 <b>NEUER ATL — {name}</b>\n"
+            f"   Floor: <b>{current_floor:.2f}€</b> (vorher: {atl:.2f}€)\n"
+            f"   <b>{drop_pct:.1f}% unter bisherigem Tief</b>"
         )
-
-    # 2) Drop >5% vs 24h average
-    avg_row = get_avg_24h(cursor, pid)
-    if avg_row and avg_row['avg_floor'] and avg_row['n'] >= 3:
-        avg_24h = avg_row['avg_floor']
-        if floor is not None and avg_24h > 0:
-            drop_pct = (avg_24h - floor) / avg_24h
-            if drop_pct >= DROP_PCT_TRIGGER:
-                alerts.append(
-                    f"⚠️ <b>{name}</b>: Floor {floor:.2f}€ — "
-                    f"<b>{drop_pct*100:.1f}% unter 24h-Ø</b> ({avg_24h:.2f}€)"
-                )
-
-    # 3) Listing spike vs prev scrape
-    prev = get_prev_listings(cursor, pid)
-    if prev and prev['total_listings'] and listings:
-        prev_listings = prev['total_listings']
-        spike_pct = (listings - prev_listings) / prev_listings
-        if spike_pct >= LISTING_SPIKE_TRIGGER:
-            alerts.append(
-                f"📦 <b>{name}</b>: Listings von {prev_listings} → <b>{listings}</b> "
-                f"(+{spike_pct*100:.0f}%) — möglicher Preisdruck"
-            )
+        # Speichere für Dedup
+        alerts_log[product_key] = current_floor
 
     return alerts
 
@@ -175,25 +194,32 @@ def run():
         print(f"❌ DB nicht gefunden: {DB_PATH}")
         return 1
 
+    # ATL-Alert-Log laden (für Dedup)
+    alerts_log = load_atl_alerts_log()
+
     conn = get_conn()
     cursor = conn.cursor()
 
     all_alerts = []
     for pid, cfg in PRODUCTS.items():
-        all_alerts.extend(check_product(cursor, pid, cfg))
+        all_alerts.extend(check_product_atl(cursor, pid, cfg, alerts_log))
 
     conn.close()
 
     if not all_alerts:
-        print(f"✅ Keine Preis-Alerts ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
+        print(f"✅ Keine ATL-Alerts ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
         return 0
 
     now = datetime.now().strftime('%d.%m.%Y %H:%M')
-    msg = f"🔔 <b>Cardmarket Alert</b> — {now}\n\n"
+    msg = f"🔔 <b>Cardmarket ATL Alert</b> — {now}\n\n"
     msg += '\n\n'.join(all_alerts)
 
     print(msg)
-    send_telegram(msg)
+    success = send_telegram(msg)
+
+    if success:
+        save_atl_alerts_log(alerts_log)
+
     return 0
 
 

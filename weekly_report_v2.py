@@ -26,11 +26,8 @@ DB_PATH = os.getenv('CARDMARKET_DB_PATH', os.path.join(os.path.dirname(os.path.a
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-PRODUCTS = {
-    1: {'name': 'Arcane Box Set', 'emoji': '🔮'},
-    2: {'name': 'Origins Booster', 'emoji': '🦋'},
-    3: {'name': 'Spiritforged Booster', 'emoji': '⚔️'},
-}
+from products import PRODUCTS as _PRODUCTS
+PRODUCTS = {pid: {'name': p['short_name'], 'emoji': p['emoji']} for pid, p in _PRODUCTS.items()}
 
 SPARKLINE_CHARS = '▁▂▃▄▅▆▇█'
 

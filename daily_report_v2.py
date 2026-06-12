@@ -26,11 +26,7 @@ DB_PATH = os.getenv('CARDMARKET_DB_PATH', os.path.join(os.path.dirname(os.path.a
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-PRODUCTS = {
-    1: {'name': 'Arcane Box Set', 'emoji': '🔮'},
-    2: {'name': 'Origins Booster', 'emoji': '🦋'},
-    3: {'name': 'Spiritforged Booster', 'emoji': '⚔️'},
-}
+from products import PRODUCTS, by_category, boxes as box_products
 
 SPARKLINE_CHARS = '▁▂▃▄▅▆▇█'
 
@@ -50,7 +46,8 @@ def send_telegram_message(message):
         'chat_id': TELEGRAM_CHAT_ID,
         'text': message,
         'parse_mode': 'HTML',
-        'disable_web_page_preview': 'true',
+        'disable_web_page_preview': 'true',  # Telegram API expects string
+        'disable_notification': 'false',
     }).encode()
     try:
         req = urllib.request.Request(url, data=data, method='POST')
@@ -141,56 +138,59 @@ def generate_report():
 
     product_data = {}
 
-    for pid, pcfg in PRODUCTS.items():
-        current, previous = get_current_and_previous(cursor, pid)
-        floors_24h = get_24h_floors(cursor, pid)
+    # Render je Kategorie (Booster Boxes, Box Sets, Singles getrennt)
+    for cat, cat_label, cat_products in by_category():
+        lines.append(f'<b>{cat_label}</b>')
+        for pid, pcfg in cat_products.items():
+            current, previous = get_current_and_previous(cursor, pid)
+            floors_24h = get_24h_floors(cursor, pid)
 
-        if not current:
-            lines.append(f'{pcfg["emoji"]} <b>{pcfg["name"]}</b>: Keine Daten')
+            if not current:
+                lines.append(f'{pcfg["emoji"]} <b>{pcfg["short_name"]}</b>: Keine Daten')
+                lines.append('')
+                continue
+
+            floor = current[0]
+            listings = current[1]
+            prev_floor = previous[0] if previous else None
+            prev_listings = previous[1] if previous else None
+
+            prices = [r[0] for r in floors_24h]
+            times = [r[1] for r in floors_24h]
+
+            low_24h = min(prices) if prices else floor
+            high_24h = max(prices) if prices else floor
+            spark = sparkline(prices)
+
+            best_time = '—'
+            if prices and times:
+                min_idx = prices.index(min(prices))
+                try:
+                    best_time = datetime.fromisoformat(times[min_idx]).strftime('%H:%M')
+                except:
+                    best_time = times[min_idx][-5:]
+
+            change_str = format_change(floor, prev_floor)
+
+            listing_change = ''
+            if prev_listings:
+                ldiff = listings - prev_listings
+                if ldiff != 0:
+                    sign = '+' if ldiff > 0 else ''
+                    listing_change = f' ({sign}{ldiff})'
+
+            lines.append(f'{pcfg["emoji"]} <b>{pcfg["short_name"]}</b>  <b>{floor:.2f}€</b>  {change_str}')
+            lines.append(f'   24h: {low_24h:.2f}–{high_24h:.2f}€ · {listings} Listings{listing_change}')
+            lines.append(f'   <code>{spark}</code>')
+            if low_24h < floor:
+                lines.append(f'   ⏰ Tief: {best_time} ({low_24h:.2f}€)')
             lines.append('')
-            continue
 
-        floor = current[0]
-        listings = current[1]
-        prev_floor = previous[0] if previous else None
-        prev_listings = previous[1] if previous else None
-
-        prices = [r[0] for r in floors_24h]
-        times = [r[1] for r in floors_24h]
-
-        # 24h stats
-        low_24h = min(prices) if prices else floor
-        high_24h = max(prices) if prices else floor
-        spark = sparkline(prices)
-
-        # Best buy time
-        best_time = '—'
-        if prices and times:
-            min_idx = prices.index(min(prices))
-            try:
-                best_time = datetime.fromisoformat(times[min_idx]).strftime('%H:%M')
-            except:
-                best_time = times[min_idx][-5:]
-
-        change_str = format_change(floor, prev_floor)
-
-        listing_change = ''
-        if prev_listings:
-            ldiff = listings - prev_listings
-            if ldiff != 0:
-                sign = '+' if ldiff > 0 else ''
-                listing_change = f' ({sign}{ldiff})'
-
-        lines.append(f'{pcfg["emoji"]} <b>{pcfg["name"]}</b>')
-        lines.append(f'   💶 Floor: <b>{floor:.2f}€</b>  {change_str}')
-        lines.append(f'   📉 24h Range: {low_24h:.2f}€ – {high_24h:.2f}€')
-        lines.append(f'   📦 Listings: {listings}{listing_change}')
-        lines.append(f'   📈 24h: <code>{spark}</code>')
-        if low_24h < floor:
-            lines.append(f'   ⏰ Tiefpunkt: {best_time} ({low_24h:.2f}€)')
-        lines.append('')
-
-        product_data[pid] = {'floor': floor, 'listings': listings, 'name': pcfg['name'], 'emoji': pcfg['emoji']}
+            product_data[pid] = {
+                'floor': floor, 'listings': listings,
+                'name': pcfg['short_name'], 'emoji': pcfg['emoji'],
+                'category': pcfg['category'],
+            }
 
     # Suspected sales
     sales = get_suspected_sales_24h(cursor)
@@ -203,19 +203,21 @@ def generate_report():
                 lines.append(f'   • {name}: {cnt}x ({min_p:.2f}–{max_p:.2f}€)')
         lines.append('')
 
-    # Market overview
-    if product_data:
-        cheapest = min(product_data.values(), key=lambda x: x['floor'])
-        total_listings = sum(v['listings'] for v in product_data.values())
+    # Markt-Überblick: NUR Booster-Markt (BBs + Box Sets), Singles separat
+    box_data = {pid: v for pid, v in product_data.items() if v['category'] in ('booster-box', 'box-set')}
+    single_data = {pid: v for pid, v in product_data.items() if v['category'] == 'single'}
+
+    if box_data:
+        cheapest_box = min(box_data.values(), key=lambda x: x['floor'])
+        total_box_listings = sum(v['listings'] for v in box_data.values())
 
         lines.append('━' * 22)
-        lines.append(f'🏷️ Günstigster: <b>{cheapest["name"]}</b> ({cheapest["floor"]:.2f}€)')
-        lines.append(f'📦 Markt gesamt: {total_listings} Listings')
+        lines.append(f'📦 Günstigste Box: <b>{cheapest_box["name"]}</b> ({cheapest_box["floor"]:.2f}€)')
+        lines.append(f'📊 Box-Markt: {total_box_listings} Listings')
 
-        # Ranking
-        sorted_p = sorted(product_data.values(), key=lambda x: x['floor'])
-        ranking = ' → '.join(f'{p["emoji"]}{p["floor"]:.0f}€' for p in sorted_p)
-        lines.append(f'🏆 {ranking}')
+        sorted_b = sorted(box_data.values(), key=lambda x: x['floor'])
+        ranking = ' → '.join(f'{p["emoji"]}{p["floor"]:.0f}€' for p in sorted_b)
+        lines.append(f'🏆 Box-Ranking: {ranking}')
 
     lines.append('')
     lines.append('<i>cardmarket.com · DE Seller · EN Karten · stündlich gescannt</i>')

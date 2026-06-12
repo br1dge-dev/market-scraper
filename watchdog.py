@@ -32,7 +32,8 @@ TELEGRAM_ALERT_CHAT_ID = os.getenv('TELEGRAM_ALERT_CHAT_ID')
 
 MAX_AGE_HOURS = 2
 
-PRODUCTS = {1: 'Arcane Box Set', 2: 'Origins Booster', 3: 'Spiritforged Booster'}
+from products import PRODUCTS as _P
+PRODUCTS = {pid: p['short_name'] for pid, p in _P.items()}
 
 
 def send_telegram(message, chat_id=None, retries=3, delay=5):
