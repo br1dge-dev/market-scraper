@@ -16,3 +16,12 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Runtime state / cache files (vom Scraper befüllt, regenerierbar)
+.atl_alerts_sent.json
+missing_cards.json
+missing_prices.json.backup
+
+# Generated charts (Reports regenerieren die bei Bedarf)
+charts/
+
